@@ -1,6 +1,28 @@
 #include <H5PLextern.h>
 #include "bitpacking.h"
 
+uint32_t largest(uint32_t arr[], size_t n)
+{
+    size_t i;
+    uint32_t max = arr[0];
+ 
+    for (i = 1; i < n; i++)
+        if (arr[i] > max)
+            max = arr[i];
+ 
+    return max;
+}
+
+unsigned int mylog2 (uint32_t val) {
+    if (val == 0 || val == 1) return 1;
+    unsigned int ret = 0;
+    while (val > 1) {
+        val >>= 1;
+        ret++;
+    }
+    return ret + 1;
+}
+
 static size_t H5Z_filter_lbp(unsigned int flags, size_t cd_nelmts,
                      const unsigned int cd_values[], size_t nbytes,
                      size_t *buf_size, void **buf);
@@ -30,7 +52,8 @@ static size_t H5Z_filter_lbp(unsigned int flags, size_t cd_nelmts,
 
   size_t outdatasize;
   int ret;
-  int bit = cd_values[0];
+  int calc_bit = cd_values[0];
+  unsigned int bit = cd_values[1];
   int offset = sizeof(size_t);
   int length;
   char *outbuf, *inbuf;
@@ -42,12 +65,16 @@ static size_t H5Z_filter_lbp(unsigned int flags, size_t cd_nelmts,
     uint8_t *data_ptr = (uint8_t*)(*&buf[0]);
     data_ptr += offset;
 
+    /* if we're setting max bit on each chunk, store it */
+    if(calc_bit) {
+      bit = data_ptr[0];
+      data_ptr++;
+    }
+
     /* size is in bytes, length is number of array elements */
     outdatasize = size_ptr[0];
     length = outdatasize / sizeof(uint32_t);
-/*
-    fprintf(stdout, "length: %u buf_size: %lu outdatasize: %lu\n", length, *buf_size, outdatasize);
-*/
+
     uint32_t *backdata = malloc(outdatasize * sizeof(uint32_t) + 64 * sizeof(uint32_t) );
     if (backdata == NULL) {
       fprintf(stderr, "memory allocation failed for rle compression\n");
@@ -55,21 +82,8 @@ static size_t H5Z_filter_lbp(unsigned int flags, size_t cd_nelmts,
     }
 
     inbuf = (char *)(*&buf[0]);
-/*
-    printf("inbuf: ");
-    for(int i = 0; i<nbytes;i++) { printf("%hhu ", inbuf[i]); }
-      printf("\n");
-
-    printf("data_ptr: ");
-    for(int i = 0; i<nbytes-offset;i++) { printf("%hhu ", data_ptr[i]); }
-      printf("\n");
-*/
     turbounpack32(data_ptr, length, bit, backdata);
-/*
-    printf("backdata: ");
-    for(int i = 0; i<length;i++) { printf("%u ", backdata[i]); }
-    printf("\n");
-*/
+
     outbuf = (char *)&backdata[0];
 
 
@@ -82,16 +96,20 @@ static size_t H5Z_filter_lbp(unsigned int flags, size_t cd_nelmts,
     uint32_t *input = (uint32_t *)(*&buf[0]);
 
     length = nbytes / sizeof(uint32_t);
+
+    if(calc_bit) {
+      bit = mylog2(largest(input, length));
+      //offset++;
+    }
+
+    fprintf(stdout, "bit: %u\n", bit);
+
+
     outdatasize = byte_count(length, bit);
-/*
-    for(int i = 0; i<length;i++) { printf("%u ", input[i]); }
-    printf("\n");
-*/
-    //fprintf(stdout, "length: %lu buf_size: %lu outdatasize: %lu\n", length, *buf_size, outdatasize);
 
 
     // allocate a buffer to write the encoded version to
-    uint8_t  *buffer = malloc((sizeof(uint8_t) * outdatasize) + offset + 32);
+    uint8_t  *buffer = malloc((sizeof(uint8_t) * outdatasize) + offset + calc_bit + 32);
     if (buffer == NULL) {
       fprintf(stderr, "memory allocation failed for rle compression\n");
       goto cleanupAndFail;
@@ -101,18 +119,21 @@ static size_t H5Z_filter_lbp(unsigned int flags, size_t cd_nelmts,
     uint8_t *data_ptr = (uint8_t*)(&buffer[offset]);
 
     *size_ptr = nbytes;
+    if(calc_bit) {
+      *data_ptr = bit;
+      data_ptr++;
+    }
 
-    //printf("Size Ptr: %lu\n", size_ptr[0]);
-
-    outdatasize += offset;
+    /* output size includes data, original size, (and stored max bit) */
+    outdatasize += (offset + calc_bit);
 
     turbopack32(input, length, bit, data_ptr);
 
     outbuf = (char *)&buffer[0];
-/*
+
     for(int i = 0; i<outdatasize;i++) { printf("%hhu ", outbuf[i]); }
       printf("\n");
-*/
+
   }
 
   /* Always replace the input buffer with the output buffer. */

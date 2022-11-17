@@ -60,7 +60,7 @@ main (void)
     for (i=0; i<DIM0; i++)
         for (j=0; j<DIM1; j++)
             //wdata[i][j] = i * j - j;
-            wdata[i][j] = 0;
+            wdata[i][j] = i;
 
     /*
      * Create a new file using the default properties.
@@ -81,7 +81,13 @@ main (void)
     dcpl_id = H5Pcreate (H5P_DATASET_CREATE);
     if (dcpl_id < 0) goto done;
 
-    status = H5Pset_filter (dcpl_id, H5Z_FILTER_RLE, H5Z_FLAG_MANDATORY, (size_t)0, cd_values);
+    /* toggle shuffle */
+    //status = H5Pset_shuffle(dcpl_id);
+    //if (status < 0) goto done;
+
+    status = H5Pset_deflate (dcpl_id, 6);
+
+    //status = H5Pset_filter (dcpl_id, H5Z_FILTER_RLE, H5Z_FLAG_MANDATORY, (size_t)0, cd_values);
     if (status < 0) goto done;
 
     /* 
